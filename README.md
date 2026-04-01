@@ -170,6 +170,28 @@ This feature exports a sequence of heightmaps at progressive erosion stages, all
 
 **Blueprint alternative:** Use a Texture2DArray and a `MaterialParameterCollection` driven by a Blueprint timeline to animate the `ErosionProgress` parameter at runtime.
 
+### UE5 Python Automation Script
+
+For a near-automatic setup, click **Export UE5 Python Script** alongside your timeline textures. This generates a `.py` file that you run inside UE5's Python editor.
+
+**What the script creates automatically:**
+- Imports all timeline heightmap and normal map textures with correct compression settings
+- Builds a complete Material (`M_LuminousErosion`) with the full Lerp chain, `ErosionProgress` scalar parameter, World Position Offset, and normal map output
+- Creates a Material Instance (`MI_LuminousErosion`)
+- Creates a Level Sequence (`SEQ_ErosionTimeline`) with your specified duration and frame rate
+
+**How to use:**
+
+1. Export the erosion timeline textures from the tool
+2. Export the UE5 Python script
+3. Copy the timeline textures into your UE5 project: `Content/LuminousErosion/Seed<NUMBER>/`
+4. In UE5, open **Tools → Execute Python Script** (or **Output Log → Python**)
+5. Run the script — it will import everything and create all assets
+6. Place a mesh in your level, apply `MI_LuminousErosion`
+7. Open `SEQ_ErosionTimeline` in Sequencer
+8. Add your mesh actor, then add a **Material Parameter track** for `ErosionProgress`
+9. Keyframe `ErosionProgress` from 0.0 → 1.0 — the terrain erodes over time
+
 ---
 
 ## How It Works
