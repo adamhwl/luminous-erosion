@@ -291,6 +291,23 @@ input[type="range"]::-moz-range-thumb{
             <button class="exp-btn exp-btn-all" onclick="exportAll()">&#8595; Export All PBR Maps<span>Downloads 6 maps as separate PNGs</span></button>
         </div>
     </div>
+
+    <!-- Erosion Timeline -->
+    <div class="section">
+        <div class="section-header">Erosion Timeline</div>
+        <div class="subtitle" style="margin-bottom:12px;font-size:11px;">Export sequential heightmaps at progressive erosion stages for UE5 Sequencer keyframing via Material World Position Offset.</div>
+        <div class="ctrl"><label>Keyframes <span class="val" id="tlFrames-value">6</span></label>
+            <input type="range" id="tlFrames" min="2" max="12" step="1" value="6" oninput="document.getElementById('tlFrames-value').textContent=this.value"></div>
+        <div class="ctrl"><label>Max Erosion Drops <span class="val" id="tlMaxDrops-value">8000</span></label>
+            <input type="range" id="tlMaxDrops" min="1000" max="20000" step="500" value="8000" oninput="document.getElementById('tlMaxDrops-value').textContent=this.value"></div>
+        <div style="margin-bottom:8px;">
+            <button class="exp-btn exp-btn-all" onclick="exportTimeline()" style="background:linear-gradient(135deg,rgba(34,211,238,0.12),rgba(99,102,241,0.12));border-color:rgba(34,211,238,0.25);">
+                &#8595; Export Erosion Timeline
+                <span>Downloads keyframe heightmaps + normal maps</span>
+            </button>
+        </div>
+        <div id="tl-progress" style="display:none;font-size:11px;color:var(--text-muted);text-align:center;margin-top:6px;font-family:'JetBrains Mono',monospace;"></div>
+    </div>
 </div>
 
 <div class="canvas-area">
@@ -432,6 +449,140 @@ function exportAll(){
     var hBlob=genHeightmap16bit(data.norm,res);
     var maps=[['normal',genNormalMap(data.norm,res)],['roughness',genRoughnessMap(data.norm,data.eroMap,res)],['basecolor',genBaseColor(data.norm,data.eroMap,res)],['ao',genAO(data.norm,res)],['erosion',genErosionMask(data.eroMap,res)]];
     var idx=0;function next(){if(idx===0){msg.textContent='Downloading 1/6...';dlBlob(hBlob,'heightmap-16bit');idx++;setTimeout(next,400);return;}var ci=idx-1;if(ci>=maps.length){msg.style.display='none';return;}msg.textContent='Downloading '+(idx+1)+'/6...';dlCanvas(maps[ci][1],maps[ci][0]);idx++;setTimeout(next,400);}next();},30);
+}
+
+// ── Erosion Timeline Export ──
+// Runs erosion incrementally capturing heightmap + normal snapshots at each stage
+function erodeSteps(hmapArr, eroArr, res, numDrops, rngRef) {
+    var dep=.02,evap=.01,grav=4,str=P.erosionStrength;
+    for(var i=0;i<numDrops;i++){
+        var px=rngRef()*(res-2)+1,py=rngRef()*(res-2)+1,dx=0,dy=0,spd=0,w=1,sed=0;
+        for(var life=0;life<80;life++){
+            var ix=px|0,iy=py|0;if(ix<1||ix>=res-1||iy<1||iy>=res-1)break;
+            var idx=iy*res+ix,h=hmapArr[idx];
+            var gx=hmapArr[idx+1]-hmapArr[idx-1],gy=hmapArr[idx+res]-hmapArr[idx-res];
+            dx=dx*.5-gx*grav;dy=dy*.5-gy*grav;
+            var len=Math.sqrt(dx*dx+dy*dy);if(len<1e-4)break;
+            dx/=len;dy/=len;px+=dx;py+=dy;
+            var ni=px|0,nj=py|0;if(ni<1||ni>=res-1||nj<1||nj>=res-1)break;
+            var nh=hmapArr[nj*res+ni],diff=nh-h;
+            if(diff>0){var d2=Math.min(sed,diff);hmapArr[idx]+=d2;sed-=d2;}
+            else{var cap=Math.max(-diff,.01)*spd*w*8;if(sed>cap){var d3=(sed-cap)*dep;hmapArr[idx]+=d3;sed-=d3;}
+            else{var er=Math.min((cap-sed)*str,-diff);hmapArr[idx]-=er;sed+=er;eroArr[idx]+=er;}}
+            spd=Math.sqrt(Math.max(0,spd*spd+diff*grav));w*=(1-evap);
+        }
+    }
+}
+
+function exportTimeline() {
+    var numFrames = parseInt(document.getElementById('tlFrames').value);
+    var maxDrops = parseInt(document.getElementById('tlMaxDrops').value);
+    var res = getExportRes();
+    var msg = document.getElementById('loading-msg');
+    var prog = document.getElementById('tl-progress');
+    msg.style.display = 'flex';
+    prog.style.display = 'block';
+
+    // Compute drops per keyframe — frame 0 is raw terrain (0 drops)
+    var dropsPerFrame = Math.floor(maxDrops / (numFrames - 1));
+
+    setTimeout(function() {
+        // Generate base terrain at export res
+        msg.textContent = 'Generating base terrain...';
+        prog.textContent = '';
+
+        // Save/restore preview state
+        var pR = RES, pH = hmap, pE = eroMap;
+
+        // Build fresh terrain
+        RES = res;
+        hmap = new Float32Array(res * res);
+        eroMap = new Float32Array(res * res);
+        rng = mulberry32(P.seed);
+        buildPerm();
+        var sc = P.noiseScale, ox = rng() * 1000, oy = rng() * 1000, oct = P.octaves | 0, rb = P.ridgeBlend;
+        for (var y = 0; y < res; y++) for (var x = 0; x < res; x++) {
+            var nx = (x / res) * sc + ox, ny = (y / res) * sc + oy;
+            var h = fbm(nx, ny, oct);
+            var ridge = 1 - Math.abs(fbm(nx + 47, ny + 47, Math.max(2, oct - 1)) * 2 - 1);
+            h = h * (1 - rb) + ridge * ridge * rb;
+            hmap[y * res + x] = h;
+        }
+
+        // Save the rng state at this point so erosion is deterministic
+        // (rng is already seeded and past terrain gen — erosion continues from here)
+
+        // Collect all frames: heightmap blobs + normal canvases
+        var frames = []; // [{hBlob, nCanvas, drops}]
+        var frameIdx = 0;
+        var totalDropsSoFar = 0;
+
+        function processFrame() {
+            if (frameIdx >= numFrames) {
+                // All frames generated — start downloading
+                downloadFrames(frames);
+                return;
+            }
+
+            var dropsThisFrame = (frameIdx === 0) ? 0 : dropsPerFrame;
+            totalDropsSoFar += dropsThisFrame;
+
+            msg.textContent = 'Frame ' + (frameIdx + 1) + '/' + numFrames + ' (' + totalDropsSoFar + ' drops)...';
+            prog.textContent = 'Eroding: ' + totalDropsSoFar + ' / ' + maxDrops + ' drops';
+
+            // Run erosion for this chunk
+            if (dropsThisFrame > 0) {
+                erodeSteps(hmap, eroMap, res, dropsThisFrame, rng);
+            }
+
+            // Snapshot
+            var norm = normalizeHmap(hmap, res * res);
+            var hBlob = genHeightmap16bit(norm, res);
+            var nCanvas = genNormalMap(norm, res);
+
+            frames.push({
+                hBlob: hBlob,
+                nCanvas: nCanvas,
+                drops: totalDropsSoFar,
+                frameNum: frameIdx
+            });
+
+            frameIdx++;
+            setTimeout(processFrame, 20); // yield to UI
+        }
+
+        setTimeout(processFrame, 20);
+
+        function downloadFrames(frms) {
+            msg.textContent = 'Downloading timeline...';
+            var di = 0;
+            function dlNext() {
+                if (di >= frms.length * 2) {
+                    // Restore preview state
+                    RES = pR; hmap = pH; eroMap = pE;
+                    msg.style.display = 'none';
+                    prog.textContent = 'Done — ' + frms.length + ' keyframes exported.';
+                    return;
+                }
+                var fi = (di / 2) | 0;
+                var isNormal = di % 2 === 1;
+                var pad = ('00' + fi).slice(-2);
+                msg.textContent = 'Downloading ' + (di + 1) + '/' + (frms.length * 2) + '...';
+                prog.textContent = 'Frame ' + fi + ' — ' + frms[fi].drops + ' drops';
+
+                if (!isNormal) {
+                    // Heightmap
+                    dlBlob(frms[fi].hBlob, 'timeline-height-f' + pad);
+                } else {
+                    // Normal
+                    dlCanvas(frms[fi].nCanvas, 'timeline-normal-f' + pad);
+                }
+                di++;
+                setTimeout(dlNext, 350);
+            }
+            dlNext();
+        }
+    }, 30);
 }
 
 // ── Three.js ──

@@ -142,6 +142,34 @@ Click individual map buttons or **Export All** to download all 6 maps at once:
 
 The normal map uses **DirectX convention** (green channel inverted), which is what UE5 expects natively. No need to flip any channels.
 
+### Erosion Timeline Export (for UE5 Sequencer)
+
+This feature exports a sequence of heightmaps at progressive erosion stages, allowing you to animate terrain formation over time in UE5's Sequencer.
+
+**Controls:**
+- **Keyframes** (2–12) — number of erosion snapshots to export
+- **Max Erosion Drops** — total drops spread across all keyframes
+
+**What gets exported:** For each keyframe, you get a 16-bit heightmap and a matching normal map, named sequentially (`timeline-height-f00`, `timeline-height-f01`, etc.). Frame 00 is the raw uneroded terrain.
+
+**UE5 Sequencer setup:**
+
+1. Import all timeline heightmaps as textures (set compression to HDR/Grayscale)
+2. Create a Material with this node setup:
+   - Add a **Scalar Parameter** called `ErosionProgress` (0.0 to 1.0)
+   - Use `ErosionProgress` to compute which two textures to blend:
+     - `FrameIndex = ErosionProgress * (NumFrames - 1)`
+     - `FrameA = floor(FrameIndex)`, `FrameB = ceil(FrameIndex)`
+     - `BlendAlpha = frac(FrameIndex)`
+   - **Lerp** between `TextureSampleA` and `TextureSampleB` using `BlendAlpha`
+   - Multiply result by a `HeightScale` parameter
+   - Output to **World Position Offset** (0, 0, Height)
+3. Do the same lerp for the normal map textures → **Normal** input
+4. In **Sequencer**, keyframe `ErosionProgress` from 0.0 → 1.0 over your desired duration
+5. The terrain will smoothly erode over time during playback
+
+**Blueprint alternative:** Use a Texture2DArray and a `MaterialParameterCollection` driven by a Blueprint timeline to animate the `ErosionProgress` parameter at runtime.
+
 ---
 
 ## How It Works
@@ -200,4 +228,4 @@ Requires WebGL support for the 3D viewport.
 
 ## License
 
-MIT — use it however you want, appreciate all the feedback, tips to improve, ideas and credits!
+MIT — use it however you want.
