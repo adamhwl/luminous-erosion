@@ -265,9 +265,17 @@ input[type="range"]::-moz-range-thumb{
             <button class="btn btn-accent" onclick="regenerate()">Regenerate</button>
             <button class="btn" onclick="resetAll()">Reset</button>
         </div>
-        <button class="btn" id="wireBtn" onclick="toggleWireframe()" style="display:flex;align-items:center;justify-content:center;gap:6px;">
+        <button class="btn" id="wireBtn" onclick="toggleWireframe()" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:10px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 20L12 4l10 16H2z"/><path d="M7 12h10"/><path d="M12 4v16"/></svg>
             Wireframe: Off
+        </button>
+        <div class="ctrl"><label>Screenshot Quality <span class="val" id="ssMultiplier-value">2x</span></label>
+            <input type="range" id="ssMultiplier" min="1" max="6" step="1" value="2" oninput="var v=this.value;document.getElementById('ssMultiplier-value').textContent=v+'x';document.getElementById('ssResLabel').textContent=Math.round(container.clientWidth*v)+'×'+Math.round(container.clientHeight*v)+'px';">
+            <div id="ssResLabel" style="font-size:10px;color:var(--text-muted);text-align:right;margin-top:2px;font-family:'JetBrains Mono',monospace;"></div>
+        </div>
+        <button class="btn btn-cyan" onclick="takeScreenshot()" style="display:flex;align-items:center;justify-content:center;gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M8 5V3h8v2"/></svg>
+            Save Screenshot
         </button>
     </div>
 
@@ -1031,6 +1039,50 @@ function toggleWireframe(){
     if(wireOn){btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 20L12 4l10 16H2z"/><path d="M7 12h10"/><path d="M12 4v16"/></svg> Wireframe: On';btn.style.borderColor='var(--accent)';btn.style.color='var(--accent)';}
     else{btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 20L12 4l10 16H2z"/><path d="M7 12h10"/><path d="M12 4v16"/></svg> Wireframe: Off';btn.style.borderColor='';btn.style.color='';}
 }
+function takeScreenshot(){
+    var mult = parseInt(document.getElementById('ssMultiplier').value) || 2;
+    var w = container.clientWidth;
+    var h = container.clientHeight;
+    var targetW = w * mult;
+    var targetH = h * mult;
+    var msg = document.getElementById('loading-msg');
+    msg.style.display = 'flex';
+    msg.textContent = 'Rendering ' + targetW + '×' + targetH + '...';
+
+    setTimeout(function(){
+        // Store original size and pixel ratio
+        var origW = renderer.domElement.width;
+        var origH = renderer.domElement.height;
+        var origPR = renderer.getPixelRatio();
+
+        // Resize renderer to high-res target
+        renderer.setPixelRatio(1);
+        renderer.setSize(targetW, targetH, false);
+        camera.aspect = targetW / targetH;
+        camera.updateProjectionMatrix();
+
+        // Render at full resolution
+        renderer.render(scene, camera);
+
+        // Capture the canvas
+        var dataURL = renderer.domElement.toDataURL('image/png');
+
+        // Restore original size
+        renderer.setPixelRatio(origPR);
+        renderer.setSize(w, h);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+
+        // Download
+        var a = document.createElement('a');
+        a.download = 'luminous-erosion-' + targetW + 'x' + targetH + '-seed' + P.seed + '.png';
+        a.href = dataURL;
+        a.click();
+
+        msg.style.display = 'none';
+    }, 50);
+}
 function updateSun(){
     var az=parseFloat(document.getElementById('sunAzimuth').value);
     var el=parseFloat(document.getElementById('sunElevation').value);
@@ -1134,6 +1186,8 @@ function resetAll(){
 
 // ── Init ──
 initThree();regenerate();animate();updateSeedDisp();
+// Init screenshot resolution label
+setTimeout(function(){var m=document.getElementById('ssMultiplier').value;document.getElementById('ssResLabel').textContent=Math.round(container.clientWidth*m)+'×'+Math.round(container.clientHeight*m)+'px';},100);
 </script>
 </body>
 </html>
